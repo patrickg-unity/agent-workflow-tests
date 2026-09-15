@@ -1,0 +1,8 @@
+*.pem
+*.p8
+*.key
+*.p12
+*.pfx
+*.der
+.env
+.env.*
