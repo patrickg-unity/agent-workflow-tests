@@ -147,9 +147,9 @@ jobs:
             echo "Prerequisite P5 not satisfied: pull request $PR is $state rather than OPEN. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
             exit 1
           fi
-          if [ "$author" != "$owner" ] && [ "$author" != "github-actions[bot]" ]
+          if [ "$author" != "$owner" ] && [ "$author" != "app/github-actions" ] && [ "$author" != "github-actions[bot]" ]
           then
-            echo "Prerequisite P5 not satisfied: pull request $PR is authored by $author, which is neither $owner nor github-actions[bot], so the App could be reviewing its own pull request. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            echo "Prerequisite P5 not satisfied: pull request $PR is authored by $author, which is none of $owner, app/github-actions, or github-actions[bot], so the App could be reviewing its own pull request. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
             exit 1
           fi
           if [ "$PHASE" = "approve" ]
