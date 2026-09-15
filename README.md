@@ -12,6 +12,12 @@ below before adding anything.
 | Id | Question | Added |
 |---|---|---|
 | [`app-approval-vs-protection`](scenarios/app-approval-vs-protection/RUNBOOK.md) | Does a review submitted by a GitHub App installation token satisfy a branch protection rule requiring one approval? | 2026-09-15 |
+| [`app-changes-requested-vs-protection`](scenarios/app-changes-requested-vs-protection/RUNBOOK.md) | Does a changes-requested review submitted by a GitHub App installation token block a merge under a branch protection rule requiring one approval with code-owner review off? | 2026-09-15 |
+
+Those two scenarios are the two directions of one question about the same App, and neither's answer
+was inferred from the other's. This index is where that relation is stated, because the landing
+checklist in [scenarios/README.md](scenarios/README.md) forbids a scenario's own three files from
+carrying another scenario's id and a cross-reference between siblings has nowhere else to go.
 
 ## Layout
 
