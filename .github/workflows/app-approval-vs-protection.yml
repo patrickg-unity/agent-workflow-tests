@@ -107,3 +107,15 @@ jobs:
         run: |
           set -euo pipefail
           gh pr review "$PR" --repo "$GITHUB_REPOSITORY" --approve --body "App approval test."
+
+      - name: Emit the run-side record fields
+        env:
+          PR: ${{ inputs.pr_number }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "Workflow-run: ${GITHUB_RUN_ID} ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf '%s\n' "Dispatched-against: ${PR}"
+          printf '%s\n' "Acting-identity: ${APP_SLUG}"
+          printf '%s\n' "Emitted-at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          printf '%s\n' "Scenario-commit: ${GITHUB_SHA}"

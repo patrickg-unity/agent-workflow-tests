@@ -26,7 +26,7 @@ below before adding anything.
 A fact is stated in one of these files and pointed at from the others, with one deliberate
 exception. The standing conventions are here, so a runbook never restates the control rule.
 `RESULTS.md` is the exception and repeats the verdict vocabulary and the queries on purpose, because
-it is copied wholesale into every new scenario and has to stand alone once it lands there.
+its header is copied into every new scenario and has to stand alone once it lands there.
 
 ## The convention
 
