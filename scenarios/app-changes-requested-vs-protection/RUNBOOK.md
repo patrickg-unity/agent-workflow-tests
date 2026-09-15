@@ -45,8 +45,11 @@ changes-requested review in force on the same pull request at the same time. Whe
 reachable with a single reviewing identity is unmeasured here, and this repository has only one
 reviewing identity available in any case: its one human authors the pull requests and GitHub bars a
 pull request author from approving or requesting changes on their own pull request, which leaves the
-App. Building that arm therefore starts with a second reviewing identity, which makes it a separate
-scenario rather than a fix to this one.
+App. Building that arm therefore starts by measuring whether one identity can hold both, which is
+what the sequence of an approving review followed by a changes-requested review from the same App
+would answer, and only then with a second reviewing identity. Either way it is a separate scenario
+with its own id, because its variable is the order of two reviews rather than the event of one, and
+it is not a fix to this one.
 
 ## Prerequisites
 

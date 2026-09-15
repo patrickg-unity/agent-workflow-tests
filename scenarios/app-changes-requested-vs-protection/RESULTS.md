@@ -126,4 +126,59 @@ retention, which has not been confirmed. If it does not, the audit is reliable o
 
 ## Records
 
-None.
+## 2026-09-15T18:56:21Z VALID
+
+Outcome-row: R1
+Verdict-reason: Both controls held, control-protection and control-identity, and exactly one row matched. The experiment arm read reviewDecision CHANGES_REQUESTED with mergeStateStatus BLOCKED, while the control arm, which received nothing, read REVIEW_REQUIRED with BLOCKED. Per row R1 that establishes registration in reviewDecision and does not establish that the review blocks on its own.
+Actor: patrickg-unity
+Scenario-commit: e2bf65c13281de6eebebc44148eccddbfcb4e121
+Subject-pin: none
+Workflow-run: 35010548980 https://github.com/patrickg-unity/agent-workflow-tests/actions/runs/35010548980
+Workflow-conclusion: success
+Preconditions:
+  branch-protection-main: {"url":"https://api.github.com/repos/patrickg-unity/agent-workflow-tests/branches/main/protection","required_pull_request_reviews":{"url":"https://api.github.com/repos/patrickg-unity/agent-workflow-tests/branches/main/protection/required_pull_request_reviews","dismiss_stale_reviews":false,"require_code_owner_reviews":false,"require_last_push_approval":false,"required_approving_review_count":1},"required_signatures":{"url":"https://api.github.com/repos/patrickg-unity/agent-workflow-tests/branches/main/protection/required_signatures","enabled":false},"enforce_admins":{"url":"https://api.github.com/repos/patrickg-unity/agent-workflow-tests/branches/main/protection/enforce_admins","enabled":false},"required_linear_history":{"enabled":false},"allow_force_pushes":{"enabled":false},"allow_deletions":{"enabled":false},"block_creations":{"enabled":false},"required_conversation_resolution":{"enabled":false},"lock_branch":{"enabled":false},"allow_fork_syncing":{"enabled":false}}
+  codeowners-absent: CODEOWNERS HTTP 404, .github/CODEOWNERS HTTP 404, docs/CODEOWNERS HTTP 404, each read with gh api repos/patrickg-unity/agent-workflow-tests/contents/<path>. The same call on README.md returned its path, so the three 404s are those files' absence rather than a call that cannot read anything.
+  actions-can-approve-pull-request-reviews: false
+Arms:
+  experiment: PR 5, test/app-changes-a-20260915, patrickg-unity
+  control-protection: PR 6, test/app-changes-b-20260915, patrickg-unity
+  control-identity: the same pull request as experiment, read once and classified twice
+Controls:
+  control-protection: EXPECT reviews empty, reviewDecision REVIEW_REQUIRED, and mergeStateStatus BLOCKED | OBSERVED reviews empty, reviewDecision REVIEW_REQUIRED, mergeStateStatus BLOCKED | HELD
+  control-identity: EXPECT exactly one review authored by workflow-test-agent with state CHANGES_REQUESTED | OBSERVED one review, author workflow-test-agent, state CHANGES_REQUESTED, on commit c8b6fa9b8bbe5ba148192b319ae64a469c8437ab | HELD
+Readings:
+  experiment, before, gh pr view 5 --repo patrickg-unity/agent-workflow-tests --json reviewDecision,mergeStateStatus,reviews
+  ```
+  {"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","reviews":[]}
+  ```
+  experiment, after, gh pr view 5 --repo patrickg-unity/agent-workflow-tests --json reviewDecision,mergeStateStatus,reviews
+  ```
+  {"mergeStateStatus":"BLOCKED","reviewDecision":"CHANGES_REQUESTED","reviews":[{"id":"PRR_kwDOUb-xbs8AAAABNs9srQ","author":{"login":"workflow-test-agent"},"authorAssociation":"NONE","body":"App changes-requested test.","submittedAt":"2026-09-15T18:56:21Z","includesCreatedEdit":false,"reactionGroups":[],"state":"CHANGES_REQUESTED","commit":{"oid":"c8b6fa9b8bbe5ba148192b319ae64a469c8437ab"}}]}
+  ```
+  control-protection, before, gh pr view 6 --repo patrickg-unity/agent-workflow-tests --json reviewDecision,mergeStateStatus,reviews
+  ```
+  {"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","reviews":[]}
+  ```
+  control-protection, after, gh pr view 6 --repo patrickg-unity/agent-workflow-tests --json reviewDecision,mergeStateStatus,reviews
+  ```
+  {"mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","reviews":[]}
+  ```
+  acting-identity provenance, after, gh run view 35010548980 --repo patrickg-unity/agent-workflow-tests --log | grep -F 'Requesting changes as'
+  ```
+  measure	Report the identity the review is submitted as	2026-09-15T18:56:20.3135178Z Requesting changes as workflow-test-agent
+  ```
+Residue: Both pull requests closed unmerged, per the teardown. Both branches test/app-changes-a-20260915 and test/app-changes-b-20260915 left in place, local and remote, which is what the teardown intends. Branch protection on main unchanged. This record was not landed by the run that produced it, because the measuring job holds contents: read.
+Amends: none
+Notes: Procedure step 10 re-ran P4's check after the measurement and it returned what it returned at step 1, {"admins":false,"approvals":1,"checks":null,"code_owners":false,"last_push":false,"restrictions":null}. The full protection JSON read after the run is byte-identical to the copy under Preconditions above, compared with diff, and a deliberately altered copy of that same file was passed through the same diff first and reported a difference, so the identical result is a comparison that ran rather than one that could not fail.
+
+The instrument's two fields moved apart on the experiment arm and that is the measurement. reviewDecision went from REVIEW_REQUIRED to CHANGES_REQUESTED while mergeStateStatus stayed BLOCKED across both readings. The control arm's reviewDecision stayed REVIEW_REQUIRED. The arms differ in one thing, so the reviewDecision difference is the App's changes-requested review registering, and the unchanged BLOCKED on the experiment arm carries no information: the control shows an unapproved pull request with no review at all already reads BLOCKED under this rule.
+
+What this run does not establish is whether the changes-requested review blocks a pull request that would otherwise be mergeable. The experiment arm holds no approving review, so its BLOCKED is over-determined. The RUNBOOK section What the control rules out, and what this scenario cannot separate states the limit, and row R1's meaning column repeats it, so a later reader cannot take this record as the blocking answer.
+
+An arm that would settle the blocking question was identified while classifying this run and is not part of this scenario. Have the App submit an approving review first, read the pull request, then have the same App submit a changes-requested review on that same pull request and read it again. If the approval is still counted while the changes-requested review is in force, the second reading isolates the block; if the later review supersedes the earlier one, the approval count falls to zero and the reading is over-determined exactly as this run's is. Either outcome is informative and neither needs a second reviewing identity, so the one-identity route is worth measuring before procuring a second App. That is a new scenario with its own id, because its variable is the order of two reviews rather than the event of one.
+
+The review's author.login reads workflow-test-agent with no [bot] suffix. A cross-check through gh api repos/patrickg-unity/agent-workflow-tests/pulls/5/reviews returns the same review's user.login as workflow-test-agent[bot] with user.type Bot. control-identity is declared against the GraphQL form because gh pr view --json is the instrument.
+
+The acting-identity grep in procedure step 6 matches two lines, not one. The second is the workflow step's own echoed command, which carries terminal escape bytes, and it is omitted from the Readings block above so that no control character enters this file. The line recorded is the step's output.
+
+The run carried two annotations, both reading "Input 'app-id' has been deprecated with message: Use 'client-id' instead." That is the deprecation the RUNBOOK's Notes on the workflow file already names, the run succeeded, and nothing was changed in response to it.
