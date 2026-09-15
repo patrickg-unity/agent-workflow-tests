@@ -1,0 +1,275 @@
+name: app-changes-vs-satisfied-approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Which single operation this dispatch performs
+        type: choice
+        required: true
+        options:
+          - open-pr
+          - approve
+          - request-changes
+      pr_number:
+        description: Number of the pull request the App reviews, for the approve and request-changes phases
+        type: string
+        required: false
+      head_branch:
+        description: Head branch the open-pr phase opens a pull request from, for that phase only
+        type: string
+        required: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Assert the dispatched phase is one this workflow implements
+        env:
+          PHASE: ${{ inputs.phase }}
+        run: |
+          set -euo pipefail
+          case "$PHASE" in
+            open-pr|approve|request-changes) ;;
+            *)
+              echo "Prerequisite P5 not satisfied: input phase must be open-pr, approve, or request-changes. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+              exit 1
+              ;;
+          esac
+
+      - name: Assert exactly the input the dispatched phase uses is set and well formed
+        env:
+          PHASE: ${{ inputs.phase }}
+          PR: ${{ inputs.pr_number }}
+          BR: ${{ inputs.head_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$PHASE" = "open-pr" ]
+          then
+            if [ -n "$PR" ]
+            then
+              echo "Prerequisite P5 not satisfied: the open-pr phase takes head_branch and pr_number was also set, so which input names the subject is ambiguous. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+              exit 1
+            fi
+            if [ -z "$BR" ]
+            then
+              echo "Prerequisite P5 not satisfied: the open-pr phase requires input head_branch and it is empty. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+              exit 1
+            fi
+            case "$BR" in
+              test/*) ;;
+              *)
+                echo "Prerequisite P5 not satisfied: input head_branch must name a branch under test/. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+                exit 1
+                ;;
+            esac
+            case "$BR" in
+              *[!a-zA-Z0-9/._-]*)
+                echo "Prerequisite P5 not satisfied: input head_branch holds a character outside the set a branch name is allowed to use here, which includes a newline, a space, and any shell metacharacter. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+                exit 1
+                ;;
+            esac
+          else
+            if [ -n "$BR" ]
+            then
+              echo "Prerequisite P5 not satisfied: the $PHASE phase takes pr_number and head_branch was also set, so which input names the subject is ambiguous. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+              exit 1
+            fi
+            if [ -z "$PR" ] || [ -n "${PR//[0-9]/}" ] || [ "${PR:0:1}" = "0" ]
+            then
+              echo "Prerequisite P5 not satisfied: input pr_number must be one line holding a positive integer with no leading zero. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+              exit 1
+            fi
+          fi
+
+      - name: Assert the App credential secrets are set
+        env:
+          APP_ID_SET: ${{ secrets.TEST_APP_ID != '' }}
+          PRIVATE_KEY_SET: ${{ secrets.TEST_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$APP_ID_SET" != "true" ]
+          then
+            echo "Prerequisite P3 not satisfied: repository secret TEST_APP_ID is unset or empty. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P3."
+            exit 1
+          fi
+          if [ "$PRIVATE_KEY_SET" != "true" ]
+          then
+            echo "Prerequisite P3 not satisfied: repository secret TEST_APP_PRIVATE_KEY is unset or empty. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P3."
+            exit 1
+          fi
+
+      - name: Assert the head branch exists and carries no pull request yet
+        if: inputs.phase == 'open-pr'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BR: ${{ inputs.head_branch }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BR" --jq .object.sha
+          then
+            echo "Prerequisite P5 not satisfied: branch $BR does not exist on $GITHUB_REPOSITORY, so there is nothing to open a pull request from. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BR" --state all --json number --jq 'length')
+          echo "Branch $BR already carries $existing pull request(s)"
+          if [ "$existing" != "0" ]
+          then
+            echo "Prerequisite P5 not satisfied: branch $BR already carries $existing pull request(s), and this phase must open the one that arm B is read on. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+
+      - name: Assert the target pull request is open, authored by a permitted identity, and in the state this phase requires
+        if: inputs.phase != 'open-pr'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHASE: ${{ inputs.phase }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if ! pr_json=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,author,reviews,reviewDecision)
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR could not be read on $GITHUB_REPOSITORY. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          state=$(printf '%s' "$pr_json" | jq -r '.state')
+          author=$(printf '%s' "$pr_json" | jq -r '.author.login')
+          decision=$(printf '%s' "$pr_json" | jq -r '.reviewDecision')
+          reviews=$(printf '%s' "$pr_json" | jq -r '.reviews | length')
+          states=$(printf '%s' "$pr_json" | jq -r '[.reviews[].state] | join(",")')
+          owner="${GITHUB_REPOSITORY%%/*}"
+          echo "Pull request $PR reads state $state, author $author, reviewDecision $decision, review count $reviews, review states [$states]"
+          if [ "$state" != "OPEN" ]
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR is $state rather than OPEN. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          if [ "$author" != "$owner" ] && [ "$author" != "github-actions[bot]" ]
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR is authored by $author, which is neither $owner nor github-actions[bot], so the App could be reviewing its own pull request. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          if [ "$PHASE" = "approve" ]
+          then
+            if [ "$reviews" != "0" ]
+            then
+              echo "Prerequisite P5 not satisfied: pull request $PR already carries $reviews review(s) and the approve phase must run on an unreviewed pull request, otherwise an existing review is credited to the App. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P5."
+              exit 1
+            fi
+          else
+            if [ "$reviews" != "1" ] || [ "$states" != "APPROVED" ] || [ "$decision" != "APPROVED" ]
+            then
+              echo "Prerequisite P7 not satisfied: pull request $PR reads review count $reviews, review states [$states], and reviewDecision $decision, where the request-changes phase requires exactly one review whose state is APPROVED and a reviewDecision of APPROVED. Submitting the changes-requested review now would produce a reading with two candidate causes and no way to tell them apart. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Prerequisites, entry P7."
+              exit 1
+            fi
+          fi
+
+  open-pull-request:
+    needs: preflight
+    if: inputs.phase == 'open-pr'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Open the pull request as the default token identity
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BR: ${{ inputs.head_branch }}
+        run: |
+          set -euo pipefail
+          number=$(gh api -X POST "repos/$GITHUB_REPOSITORY/pulls" \
+            -f title="satisfied-approval arm B" \
+            -f head="$BR" \
+            -f base=main \
+            -f body="Experiment arm. A human approves, then the App requests changes." \
+            --jq .number)
+          echo "Opened-pull-request: $number"
+          printf '%s\n' "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Report the identity the pull request was opened as
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ steps.open.outputs.number }}
+        run: |
+          set -euo pipefail
+          author=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json author --jq .author.login)
+          echo "Opened as $author"
+
+      - name: Emit the run-side record fields
+        env:
+          BR: ${{ inputs.head_branch }}
+          NUMBER: ${{ steps.open.outputs.number }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "Workflow-run: ${GITHUB_RUN_ID} ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf '%s\n' "Dispatched-phase: open-pr"
+          printf '%s\n' "Dispatched-against: ${BR}"
+          printf '%s\n' "Opened-pull-request: ${NUMBER}"
+          printf '%s\n' "Emitted-at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          printf '%s\n' "Scenario-commit: ${GITHUB_SHA}"
+
+  submit-review:
+    needs: preflight
+    if: inputs.phase != 'open-pr'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Mint an installation access token for the test App
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.TEST_APP_ID }}
+          private-key: ${{ secrets.TEST_APP_PRIVATE_KEY }}
+
+      - name: Report the identity the review is submitted as
+        env:
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+          PHASE: ${{ inputs.phase }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_SLUG" ]
+          then
+            echo "The app-slug output of the token-mint step is empty, so the acting identity cannot be established and no review is submitted. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+            exit 1
+          fi
+          echo "Reviewing as $APP_SLUG with event $PHASE"
+
+      - name: Submit the review for the dispatched phase as the App
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PHASE: ${{ inputs.phase }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          case "$PHASE" in
+            approve)
+              gh pr review "$PR" --repo "$GITHUB_REPOSITORY" --approve --body "App approval, the baseline this scenario reads the changes-requested review against."
+              ;;
+            request-changes)
+              gh pr review "$PR" --repo "$GITHUB_REPOSITORY" --request-changes --body "App changes-requested test, submitted while the approval requirement is already satisfied."
+              ;;
+            *)
+              echo "The phase $PHASE reached the review step, which implements approve and request-changes only. See scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md, section Notes on the workflow file."
+              exit 1
+              ;;
+          esac
+
+      - name: Emit the run-side record fields
+        env:
+          PHASE: ${{ inputs.phase }}
+          PR: ${{ inputs.pr_number }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "Workflow-run: ${GITHUB_RUN_ID} ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf '%s\n' "Dispatched-phase: ${PHASE}"
+          printf '%s\n' "Dispatched-against: ${PR}"
+          printf '%s\n' "Acting-identity: ${APP_SLUG}"
+          printf '%s\n' "Emitted-at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          printf '%s\n' "Scenario-commit: ${GITHUB_SHA}"

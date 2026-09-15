@@ -37,6 +37,34 @@ This generalizes past approvals. Whatever a scenario measures, the machinery tha
 does not depend on that thing working. Records land under the admin bypass, by a human, per
 `RUNBOOK.md` `## Landing a record`.
 
+## Standing rule: a scenario asking whether something blocks satisfies the approval requirement first
+
+A scenario whose question is whether some act blocks a merge satisfies the approval requirement on
+the base branch before that act is introduced, and reads the pull request in between. A scenario
+that introduces the act onto a pull request the rule already blocks is uninterpretable and is not
+landed.
+
+The concrete case that produced this rule: the scenario measuring a GitHub App's changes-requested
+review under a rule requiring one approving review established that the review registers in
+`reviewDecision`, and could establish nothing about whether it blocks. Under that rule a pull request
+carrying only a changes-requested review has no approval either, so its `mergeStateStatus: BLOCKED`
+has two candidate causes at once and every reading in that run came back `BLOCKED`, including
+readings taken before any review existed.
+
+No control arm repairs it, and that is the part worth keeping. A control can show the unmet approval
+requirement is by itself sufficient to produce `BLOCKED`, which is exactly what makes the experiment
+reading carry no information rather than what rescues it. The fix is in the order of operations: get
+the pull request to a reading of `APPROVED` with `CLEAN`, record that reading, and only then
+introduce the act under test. A `BLOCKED` reading after that point has one remaining candidate
+cause, and the recorded before reading is the evidence for that claim.
+
+Two consequences for a scenario built this way. The before reading is a control arm rather than a
+convenience, because the claim that the requirement was satisfied is exactly as falsifiable as any
+other apparatus claim. And a pull request whose approval comes from the same identity that performs
+the act under test does not satisfy this rule, because GitHub counts the most recent review from each
+reviewer and the act replaces the approval it was supposed to be added beside. Read `latestReviews`
+to tell the two apart rather than reasoning about which one GitHub kept.
+
 ## Skeleton 1, to `scenarios/@@ID@@/RUNBOOK.md`
 
 ````
