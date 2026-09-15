@@ -311,6 +311,12 @@ once for the control that reads the same output for a different property. Runnin
 second time against the same pull request at the same moment would be a defect, because the two arms
 could then read a pull request that changed between the calls.
 
+PR B's author is written `github-actions[bot]` in that table, which is the spelling
+`gh api repos/OWNER/REPO/pulls/N` returns. The same identity reads `app/github-actions` through
+`gh pr view --json author`, and `## Notes on the workflow file` carries both spellings and the
+measurement behind them. Neither spelling appears in the instrument's output, because the instrument
+reads reviews and not authorship.
+
 `control-protection` is authored by `patrickg-unity` rather than by `github-actions[bot]`, so its
 author does not match the arm it is compared against. Branch protection applies to the base branch
 and not to the author, and `require_last_push_approval` is `false` under P4, so there is no path by
@@ -529,11 +535,27 @@ argument.
 `preflight` holds `pull-requests: read` because it reads `reviewDecision` and the review list. That
 grant cannot submit a review either.
 
-The permitted-author test lists two identities, the repository owner taken from `GITHUB_REPOSITORY`
-and the literal `github-actions[bot]`. The owner is derived rather than written down. The bot login is
-written down because it is the fixed login of the default `GITHUB_TOKEN` and there is no expression
-that yields it, and the test exists to rule out the App having authored the pull request it is about
-to review, which GitHub would refuse.
+The permitted-author test lists three logins, the repository owner taken from `GITHUB_REPOSITORY`
+plus the two spellings of the default token's identity. The owner is derived rather than written
+down. The bot logins are written down because there is no expression that yields either one, and the
+test exists to rule out the App having authored the pull request it is about to review, which GitHub
+would refuse.
+
+The two spellings are the reason that test lists more logins than there are identities. A pull
+request opened by the default `GITHUB_TOKEN` reads `app/github-actions` with `is_bot: true` through
+`gh pr view --json author`, and `github-actions[bot]` with `user.type: Bot` through
+`gh api repos/OWNER/REPO/pulls/N`. Both were measured on 2026-09-15 against pull request 11 of this
+repository, which that token opened. The test runs on the `gh pr view` form and carries the REST form
+as well, so it holds if a later `gh` release renders the author the other way.
+
+That test is an allowlist and not a denylist, so an author spelling it does not know fails the
+dispatch rather than passing it. That direction was measured rather than reasoned about: the first
+`request-changes` dispatch against pull request 11 ran against a version of this test carrying only
+the REST spelling, preflight refused it naming the author it read, and `submit-review` reported
+skipped, which is the `RX` row taken from the run's own job data. A denylist would have let an
+unrecognized author through to the review step, and the one author this test exists to exclude is the
+App, whose review GitHub would then refuse anyway. The allowlist costs a dispatch and never submits a
+review it should not have.
 
 `preflight` and the measuring jobs are separate jobs rather than steps of one job. When a needed job
 fails, its dependents report as skipped rather than failed, so a run that never set up reads
