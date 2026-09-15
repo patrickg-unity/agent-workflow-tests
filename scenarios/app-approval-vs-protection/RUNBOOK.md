@@ -50,7 +50,7 @@ lifetime: one-time, and left in place afterwards as part of the repository basel
 check: `gh api repos/patrickg-unity/agent-workflow-tests/branches/main/protection --jq '{approvals: .required_pull_request_reviews.required_approving_review_count, admins: .enforce_admins.enabled}'` returns `{"approvals":1,"admins":false}`.
 
 P5
-what: Open PR A on branch `test/app-approval-a` and PR B on branch `test/app-approval-b`, each a different one-line edit, both authored by `patrickg-unity`, both targeting `main`, neither reviewed by anyone. Cut both branches from the current tip of `main`, so that neither reads `mergeStateStatus: BEHIND`, which no substantive row covers.
+what: Open PR A on branch `test/app-approval-a-<RUN>` and PR B on branch `test/app-approval-b-<RUN>`, each a different one-line edit, both authored by `patrickg-unity`, both targeting `main`, neither reviewed by anyone. Cut both branches from the current tip of `main`, so that neither reads `mergeStateStatus: BEHIND`, which no substantive row covers. Both branch names carry a per-run discriminator `<RUN>`, so a branch left behind by an earlier run can never block a later one and deleting it is optional hygiene rather than a prerequisite.
 who: operator
 where: the commands in the block below, with `<clone>` the local checkout path.
 produces: two open, unreviewed pull requests
@@ -59,16 +59,16 @@ check: `gh pr view <N> --repo patrickg-unity/agent-workflow-tests --json state,a
 
 ```
 git -C <clone> fetch origin main
-git -C <clone> switch --no-track -c test/app-approval-a origin/main
+git -C <clone> switch --no-track -c test/app-approval-a-<RUN> origin/main
 printf '%s\n' "Arm A marker." >> <clone>/README.md
 git -C <clone> commit -am "test: arm A marker for app-approval-vs-protection"
-git -C <clone> push origin test/app-approval-a
-gh pr create --repo patrickg-unity/agent-workflow-tests --base main --head test/app-approval-a --title "app-approval arm A" --body "Experiment arm. Receives the App review."
-git -C <clone> switch --no-track -c test/app-approval-b origin/main
+git -C <clone> push origin test/app-approval-a-<RUN>
+gh pr create --repo patrickg-unity/agent-workflow-tests --base main --head test/app-approval-a-<RUN> --title "app-approval arm A" --body "Experiment arm. Receives the App review."
+git -C <clone> switch --no-track -c test/app-approval-b-<RUN> origin/main
 printf '%s\n' "Arm B marker." >> <clone>/README.md
 git -C <clone> commit -am "test: arm B marker for app-approval-vs-protection"
-git -C <clone> push origin test/app-approval-b
-gh pr create --repo patrickg-unity/agent-workflow-tests --base main --head test/app-approval-b --title "app-approval arm B" --body "Control arm. Receives no review."
+git -C <clone> push origin test/app-approval-b-<RUN>
+gh pr create --repo patrickg-unity/agent-workflow-tests --base main --head test/app-approval-b-<RUN> --title "app-approval arm B" --body "Control arm. Receives no review."
 ```
 
 ### P1 proves existence only
@@ -199,9 +199,9 @@ motivates the change.
 
 | Arm | Pull request | Branch | Author | What it receives |
 |---|---|---|---|---|
-| `experiment` | PR A | `test/app-approval-a` | `patrickg-unity` | one approving review submitted by the App |
-| `control-protection` | PR B | `test/app-approval-b` | `patrickg-unity` | nothing |
-| `control-identity` | PR A | `test/app-approval-a` | `patrickg-unity` | the same App review, and the same reading as `experiment` |
+| `experiment` | PR A | `test/app-approval-a-<RUN>` | `patrickg-unity` | one approving review submitted by the App |
+| `control-protection` | PR B | `test/app-approval-b-<RUN>` | `patrickg-unity` | nothing |
+| `control-identity` | PR A | `test/app-approval-a-<RUN>` | `patrickg-unity` | the same App review, and the same reading as `experiment` |
 
 `experiment` and `control-identity` are one subject read once. The instrument is run against PR A a
 single time per moment and both arms are classified from that one output, which is why the record
@@ -248,11 +248,33 @@ would-fail-if: TEST_APP_ID or TEST_APP_PRIVATE_KEY belongs to a different App, i
 6. Keep the acting identity the workflow reported, with `gh run view <run id> --repo patrickg-unity/agent-workflow-tests --log | grep -F 'Approving as'`, verbatim. This is provenance and not a control reading: it records which identity the workflow minted a token for, it outlives the run log's 90-day retention, and `control-identity` is classified in step 8 from the `reviews` field of the `after` reading rather than from this line. The expected slug is `workflow-test-agent`, and a mismatch here is reported rather than smoothed over even when the reviews field reads HELD.
 7. Read both pull requests again with the instrument. This is the `after` reading. Apply the `UNKNOWN` procedure above to either arm that returns it.
 8. Classify both controls first, then the experiment, against the outcome table below.
-9. Append the record to `RESULTS.md`, filling `Actor` with the login that dispatched the run and `Residue` with what this run actually left behind, which can differ from the teardown's intent when a run failed partway.
+9. Assemble the record. Take the run-side fields from the run's job log, which carries the run id, URL, acting identity, dispatch input and UTC timestamp. Take the readings from steps 3 and 7 and the apparatus from step 2. Fill `Actor` with the login that dispatched the run and `Residue` with what this run actually left behind, which can differ from the teardown's intent when a run failed partway. Hold the assembled record until it is landed in a batch, per `## Landing a record` below. A run never writes `RESULTS.md`.
 10. Run the teardown.
 
 Step 8 orders the classifications on purpose. Once the experiment reading is in view it is hard to
 read a control as anything but confirmation of it.
+
+## Landing a record
+
+A run never writes to this repository. The measuring job holds `contents: read` and nothing more,
+which is what makes the measurement unambiguous, and that grant is not traded for bookkeeping.
+
+Records reach `RESULTS.md` in batches, by the maintainer, in one act per batch rather than one per
+run:
+
+1. Collect the assembled records for every run since the last landing, oldest first.
+2. Cut a branch from the current tip of `main`.
+3. Append each record to the end of its scenario's `RESULTS.md`, in run order.
+4. Open a pull request and merge it under the admin bypass, which `enforce_admins: false` provides
+   and which the repository `README.md` `## Baseline` already names as the route by which anything
+   lands here.
+
+Never land a record by having the test App approve the landing pull request. The standing rule and
+its reasoning are in `scenarios/README.md`.
+
+A record that has not landed yet is not lost, but it is held in one person's scratch rather than in
+the repository, and the run log it was derived from is deleted after 90 days. Land batches before
+that window closes.
 
 ## Outcome table
 
@@ -278,37 +300,29 @@ expected value set, so nothing about them looks anomalous at classification time
 
 ## Teardown
 
-Creates: branches `test/app-approval-a` and `test/app-approval-b`, and their two pull requests.
+Creates: branches `test/app-approval-a-<RUN>` and `test/app-approval-b-<RUN>`, and their two pull requests.
 
-Restores: both branches, by deleting them remotely and locally. Close both pull requests without
-merging, then delete all four refs:
+Restores: nothing that a later run depends on. Close both pull requests without merging:
 
 ```
 gh pr close <PR A> --repo patrickg-unity/agent-workflow-tests
 gh pr close <PR B> --repo patrickg-unity/agent-workflow-tests
-gh api -X DELETE repos/patrickg-unity/agent-workflow-tests/git/refs/heads/test/app-approval-a
-gh api -X DELETE repos/patrickg-unity/agent-workflow-tests/git/refs/heads/test/app-approval-b
-git -C <clone> switch main
-git -C <clone> branch -D test/app-approval-a
-git -C <clone> branch -D test/app-approval-b
 ```
 
-Where the repository has automatic head-branch deletion enabled, `gh pr close` removes the remote ref
-itself and the matching `gh api -X DELETE` then returns 422 with "Reference does not exist". That is
-the already-done case rather than a failure, so continue to the local deletions.
+Deleting the branches is optional hygiene and is deliberately not part of the teardown. Because both
+branch names carry a per-run discriminator, a branch left in place blocks nothing, and the next run
+cuts fresh names from the current tip of `main`.
 
-Deleting the remote refs and the local branches together is what makes a second run possible. P5
-requires both branches cut from the current tip of `main` carrying open unreviewed pull requests, and
-a branch sitting at a stale tip under a closed pull request satisfies neither half. Deleting the
-remote ref alone does not get there: the local branch survives, the clone is usually still standing
-on `test/app-approval-b`, and replaying P5 fails at its first `git switch -c` with "a branch named
-'test/app-approval-a' already exists". The `git switch main` line is what releases the checked-out
-branch so the deletion can proceed.
+Two reasons to leave them. They are the run's artifacts, and the closed pull requests reference them,
+so deleting them makes those pull requests' diffs unreadable and destroys the evidence the record's
+`Readings` were taken against. And branch deletion is separately gated in some of the environments
+this runbook is executed from, so a teardown that requires it fails for reasons unrelated to the
+scenario.
 
-`branch -D` is deliberate rather than careless. These branches are never merged, so `branch -d`
-refuses them, and their whole content is one marker line under a closed pull request. A closed pull
-request stays readable after its branch is deleted, and the record carries every reading verbatim in
-any case, so nothing this scenario measured depends on either branch surviving.
+Where someone does delete them, `gh pr close` may already have removed the remote ref if the
+repository has automatic head-branch deletion enabled, in which case the matching
+`gh api -X DELETE repos/patrickg-unity/agent-workflow-tests/git/refs/heads/<branch>` returns 422 with
+"Reference does not exist". That is the already-done case rather than a failure.
 
 Deliberately left: branch protection on `main` stays enabled, because later scenarios assume it as
 part of the repository baseline. The minted installation token is revoked by the action in its own

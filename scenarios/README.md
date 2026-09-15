@@ -19,6 +19,24 @@ This is a documented boundary rather than an oversight. Resolving it is an open 
 in this repository depends on the answer. Do not work around it by adding a trigger to a scenario
 workflow.
 
+## Standing rule: a scenario never routes its own bookkeeping through its own subject
+
+A test surface must not route its own bookkeeping through its own subject.
+
+The concrete case that produced this rule: `app-approval-vs-protection` established that a GitHub
+App installation token's review satisfies a branch protection rule requiring one approval. That
+makes the test App a working approver, and a landing pull request needs an approval, so reaching for
+the App to approve it is the obvious move and it is forbidden.
+
+The reason is what the repository would lose. The App's approval power is the thing under test. A
+record-landing path that depends on it converts any future change in that behavior from a test
+result into a broken bookkeeping pipeline, and the repository loses the ability to record the very
+finding that broke it. The result would be indistinguishable from the tooling being down.
+
+This generalizes past approvals. Whatever a scenario measures, the machinery that records its results
+does not depend on that thing working. Records land under the admin bypass, by a human, per
+`RUNBOOK.md` `## Landing a record`.
+
 ## Skeleton 1, to `scenarios/@@ID@@/RUNBOOK.md`
 
 ````
@@ -145,10 +163,14 @@ skeleton above are an illustration rather than a prescribed count. The live
 
 ## Skeleton 2, to `scenarios/@@ID@@/RESULTS.md`
 
-Copy the whole of [`app-approval-vs-protection/RESULTS.md`](app-approval-vs-protection/RESULTS.md)
-and replace the scenario id everywhere it appears. That file is the canonical header: the verdict
-vocabulary, the query, the record format, the correction rule, and the completeness audit, with zero
-records under `## Records`.
+Copy [`app-approval-vs-protection/RESULTS.md`](app-approval-vs-protection/RESULTS.md) down to but
+not including its `## Records` heading, then write that heading into the new file with `None.` under
+it. Replace the scenario id everywhere it appears. Everything above `## Records` is the canonical
+header: the verdict vocabulary, the query, the record format, the correction rule, and the
+completeness audit.
+
+The records below that heading are never copied. They are one scenario's evidence for runs that
+happened, so a record carried into a new scenario would assert a run that scenario never had.
 
 Four blocks inside its record format are specific to that scenario and are rewritten rather than
 copied. Everything else in the file is standing convention and is kept as it is.
@@ -242,5 +264,6 @@ preflight that can pass while failing is worse than none.
 10. A scenario that changes `enforce_admins` restores it to `false` in `## Teardown`. Leaving it `true` makes this repository unextendable by one person, for the reasons in the repository README's `## Baseline` section.
 11. No credential value, sample value, or redacted-looking value appears anywhere in the three files.
 12. `grep -rn 'app-approval-vs-protection' scenarios/<new-id>/ .github/workflows/<new-id>.yml` returns nothing, which catches an id the RESULTS.md copy above left behind.
-13. No comment line appears in any of the three files, the workflow included. A why goes into the runbook prose.
-14. The scenario has a row in the index table in the repository README.
+13. `grep -cE '^## [0-9]{4}-[0-9]{2}-[0-9]{2}T' scenarios/<new-id>/RESULTS.md` returns 0, which catches a record copied in along with the header. Item 12 cannot catch one, because a record body carries no scenario id. This is the instrument `## Completeness` already uses to count records, so the checklist and that section cannot drift apart on what a record heading is.
+14. No comment line appears in any of the three files, the workflow included. A why goes into the runbook prose.
+15. The scenario has a row in the index table in the repository README.
