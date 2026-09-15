@@ -13,11 +13,21 @@ below before adding anything.
 |---|---|---|
 | [`app-approval-vs-protection`](scenarios/app-approval-vs-protection/RUNBOOK.md) | Does a review submitted by a GitHub App installation token satisfy a branch protection rule requiring one approval? | 2026-09-15 |
 | [`app-changes-requested-vs-protection`](scenarios/app-changes-requested-vs-protection/RUNBOOK.md) | Does a changes-requested review submitted by a GitHub App installation token block a merge under a branch protection rule requiring one approval with code-owner review off? | 2026-09-15 |
+| [`app-changes-vs-satisfied-approval`](scenarios/app-changes-vs-satisfied-approval/RUNBOOK.md) | Does a changes-requested review submitted by a GitHub App installation token block a merge when the one-approving-review requirement is already satisfied at the moment the App submits it? | 2026-09-15 |
 
-Those two scenarios are the two directions of one question about the same App, and neither's answer
-was inferred from the other's. This index is where that relation is stated, because the landing
-checklist in [scenarios/README.md](scenarios/README.md) forbids a scenario's own three files from
-carrying another scenario's id and a cross-reference between siblings has nowhere else to go.
+The first two scenarios are the two directions of one question about the same App, and neither's
+answer was inferred from the other's. The third exists because the second could not answer the
+blocking half of its own question: under a rule requiring one approval, a pull request carrying only
+a changes-requested review has no approval either, so its `BLOCKED` reading has two candidate causes
+and no control separates them. The third satisfies the approval requirement first and reads the
+pull request in between, which is the only configuration in which a later `BLOCKED` is attributable.
+The standing form of that requirement is in [scenarios/README.md](scenarios/README.md) under
+`## Standing rule: a scenario asking whether something blocks satisfies the approval requirement
+first`.
+
+This index is where those relations are stated, because the landing checklist in
+[scenarios/README.md](scenarios/README.md) forbids a scenario's own three files from carrying
+another scenario's id and a cross-reference between siblings has nowhere else to go.
 
 ## Layout
 
@@ -138,6 +148,7 @@ on `main` until a commit creates the branch.
 - `github.com/patrickg-unity/agent-workflow-tests`, public, default branch `main`.
 - Branch protection on `main` requiring one approving review, with `enforce_admins: false`, set by `app-approval-vs-protection` at prerequisite P4 and deliberately left on afterwards.
 - No required status checks and no push restrictions, set by that same call.
+- `can_approve_pull_request_reviews` is `false` on `actions/permissions/workflow`, which is the API field behind the settings toggle "Allow GitHub Actions to create and approve pull requests", and `default_workflow_permissions` is `read`. A scenario that needs `github-actions[bot]` to open or approve a pull request turns the first field on and restores it, per its own `## Teardown`.
 - `patrickg-unity` holds admin and is the only human.
 
 `enforce_admins: false` is a standing invariant of this repository, not a parameter of any one
