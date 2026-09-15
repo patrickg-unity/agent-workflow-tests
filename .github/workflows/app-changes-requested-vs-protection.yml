@@ -1,0 +1,121 @@
+name: app-changes-requested-vs-protection
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Number of the pull request that receives the App changes-requested review
+        type: string
+        required: true
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Assert input pr_number is well formed
+        env:
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PR" ] || [ -n "${PR//[0-9]/}" ] || [ "${PR:0:1}" = "0" ]
+          then
+            echo "Prerequisite P5 not satisfied: input pr_number must be one line holding a positive integer with no leading zero. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+
+      - name: Assert the App credential secrets are set
+        env:
+          APP_ID_SET: ${{ secrets.TEST_APP_ID != '' }}
+          PRIVATE_KEY_SET: ${{ secrets.TEST_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [ "$APP_ID_SET" != "true" ]
+          then
+            echo "Prerequisite P3 not satisfied: repository secret TEST_APP_ID is unset or empty. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P3."
+            exit 1
+          fi
+          if [ "$PRIVATE_KEY_SET" != "true" ]
+          then
+            echo "Prerequisite P3 not satisfied: repository secret TEST_APP_PRIVATE_KEY is unset or empty. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P3."
+            exit 1
+          fi
+
+      - name: Assert the target pull request is open, owner-authored, and unreviewed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          if ! pr_json=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,author,reviews)
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR could not be read on $GITHUB_REPOSITORY. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          state=$(printf '%s' "$pr_json" | jq -r '.state')
+          author=$(printf '%s' "$pr_json" | jq -r '.author.login')
+          reviews=$(printf '%s' "$pr_json" | jq -r '.reviews | length')
+          expected_author="${GITHUB_REPOSITORY%%/*}"
+          echo "Pull request $PR reads state $state, author $author, review count $reviews"
+          if [ "$state" != "OPEN" ]
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR is $state rather than OPEN. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          if [ "$author" != "$expected_author" ]
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR is authored by $author rather than $expected_author, so the App could be requesting changes on its own pull request. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+          if [ "$reviews" != "0" ]
+          then
+            echo "Prerequisite P5 not satisfied: pull request $PR already carries $reviews review(s) and the experiment arm must be unreviewed, otherwise an existing review is credited to the App. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Prerequisites, entry P5."
+            exit 1
+          fi
+
+  measure:
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Mint an installation access token for the test App
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.TEST_APP_ID }}
+          private-key: ${{ secrets.TEST_APP_PRIVATE_KEY }}
+
+      - name: Report the identity the review is submitted as
+        env:
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_SLUG" ]
+          then
+            echo "The app-slug output of the token-mint step is empty, so the acting identity cannot be established and no review is submitted. See scenarios/app-changes-requested-vs-protection/RUNBOOK.md, section Notes on the workflow file."
+            exit 1
+          fi
+          echo "Requesting changes as $APP_SLUG"
+
+      - name: Submit the changes-requested review as the App
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          gh pr review "$PR" --repo "$GITHUB_REPOSITORY" --request-changes --body "App changes-requested test."
+
+      - name: Emit the run-side record fields
+        env:
+          PR: ${{ inputs.pr_number }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "Workflow-run: ${GITHUB_RUN_ID} ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          printf '%s\n' "Dispatched-against: ${PR}"
+          printf '%s\n' "Acting-identity: ${APP_SLUG}"
+          printf '%s\n' "Emitted-at: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          printf '%s\n' "Scenario-commit: ${GITHUB_SHA}"
